@@ -1,0 +1,1089 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BumpArena 2D - Multiplayer & Local Arcade</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- PeerJS CDN for WebRTC P2P Connectivity -->
+    <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+    <!-- FontAwesome icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;600;800;900&family=Rajdhani:wght@500;600;700&display=swap');
+
+        body {
+            font-family: 'Rajdhani', sans-serif;
+            background-color: #0b0f19;
+            color: #ffffff;
+            overflow: hidden;
+            touch-action: none;
+            user-select: none;
+        }
+
+        .font-orbitron {
+            font-family: 'Orbitron', sans-serif;
+        }
+
+        /* Neon Glow Effects */
+        .glow-cyan {
+            box-shadow: 0 0 15px rgba(6, 182, 212, 0.6), inset 0 0 10px rgba(6, 182, 212, 0.4);
+        }
+
+        .glow-pink {
+            box-shadow: 0 0 15px rgba(236, 72, 153, 0.6), inset 0 0 10px rgba(236, 72, 153, 0.4);
+        }
+
+        .text-glow-cyan {
+            text-shadow: 0 0 8px rgba(6, 182, 212, 0.8);
+        }
+
+        .text-glow-pink {
+            text-shadow: 0 0 8px rgba(236, 72, 153, 0.8);
+        }
+
+        canvas {
+            display: block;
+            border-radius: 1rem;
+            box-shadow: 0 0 30px rgba(0, 0, 0, 0.8), 0 0 15px rgba(6, 182, 212, 0.2);
+        }
+
+        /* Custom Scrollbar for room IDs or logs */
+        ::-webkit-scrollbar {
+            width: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: rgba(15, 23, 42, 0.6);
+        }
+        ::-webkit-scrollbar-thumb {
+            background: rgba(56, 189, 248, 0.5);
+            border-radius: 3px;
+        }
+
+        .modal-bg {
+            background: rgba(11, 15, 25, 0.85);
+            backdrop-filter: blur(8px);
+        }
+    </style>
+</head>
+<body class="h-screen w-screen flex flex-col justify-between items-center p-2 sm:p-4 bg-slate-950">
+
+    <!-- TOP HEADER / HUD -->
+    <header class="w-full max-w-5xl flex justify-between items-center z-10 px-4 py-2 bg-slate-900/80 backdrop-blur border border-slate-800 rounded-xl shadow-lg">
+        <div class="flex items-center gap-3">
+            <h1 class="text-xl sm:text-2xl font-black font-orbitron tracking-wider text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-pink-500">
+                BUMP<span class="text-white">ARENA</span> 2D
+            </h1>
+            <span id="gameModeBadge" class="hidden sm:inline-block px-2.5 py-0.5 text-xs font-bold uppercase rounded-full bg-slate-800 text-slate-300 border border-slate-700">
+                Menu
+            </span>
+        </div>
+
+        <!-- Scoreboard (Visible during gameplay) -->
+        <div id="scoreboard" class="hidden flex items-center gap-6 font-orbitron text-lg font-bold">
+            <div class="flex items-center gap-2 text-cyan-400">
+                <span id="p1Name">Gracz 1</span>: <span id="p1Score" class="text-2xl text-white">0</span>
+            </div>
+            <div class="text-slate-500 text-sm">VS</div>
+            <div class="flex items-center gap-2 text-pink-500">
+                <span id="p2Score" class="text-2xl text-white">0</span> : <span id="p2Name">Gracz 2</span>
+            </div>
+        </div>
+
+        <div class="flex items-center gap-2">
+            <button id="btnSound" class="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 transition border border-slate-700">
+                <i class="fa-solid fa-volume-high"></i>
+            </button>
+            <button id="btnMenu" class="hidden px-3 py-1.5 rounded-lg bg-red-900/40 hover:bg-red-800/60 text-red-300 text-sm font-semibold border border-red-700/50 transition flex items-center gap-1.5">
+                <i class="fa-solid fa-house"></i> <span class="hidden sm:inline">Menu</span>
+            </button>
+        </div>
+    </header>
+
+    <!-- MAIN GAME CANVAS CONTAINER -->
+    <main class="relative flex-1 w-full max-w-5xl my-2 flex items-center justify-center overflow-hidden">
+        <canvas id="gameCanvas" class="w-full h-full object-contain"></canvas>
+
+        <!-- DASH / SKILL COOLDOWN HUD OVERLAY (Bottom of Arena) -->
+        <div id="hudSkills" class="hidden absolute bottom-4 left-1/2 transform -translate-x-1/2 flex gap-4 pointer-events-none">
+            <div class="flex flex-col items-center bg-slate-900/90 border border-cyan-500/50 rounded-xl p-2 px-3 text-xs shadow-lg">
+                <span class="text-cyan-400 font-bold mb-1">P1 Dash [Space/W]</span>
+                <div class="w-24 bg-slate-800 h-2 rounded-full overflow-hidden border border-slate-700">
+                    <div id="p1DashBar" class="bg-cyan-400 h-full w-full transition-all duration-75"></div>
+                </div>
+            </div>
+            <div id="p2SkillHud" class="flex flex-col items-center bg-slate-900/90 border border-pink-500/50 rounded-xl p-2 px-3 text-xs shadow-lg">
+                <span class="text-pink-400 font-bold mb-1">P2 Dash [Numpad0/Up]</span>
+                <div class="w-24 bg-slate-800 h-2 rounded-full overflow-hidden border border-slate-700">
+                    <div id="p2DashBar" class="bg-pink-500 h-full w-full transition-all duration-75"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- MAIN MENU MODAL OVERLAY -->
+        <div id="mainMenu" class="absolute inset-0 modal-bg flex items-center justify-center p-4 z-20">
+            <div class="max-w-md w-full bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-2xl flex flex-col gap-5 text-center">
+                <div>
+                    <h2 class="text-3xl font-black font-orbitron text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-pink-500">
+                        BUMP ARENA
+                    </h2>
+                    <p class="text-slate-400 text-sm mt-1">Zepchnij przeciwnika w przepaść zniekształcając przestrzeń!</p>
+                </div>
+
+                <div class="space-y-3">
+                    <!-- Local Bot Mode -->
+                    <button id="btnPlayBot" class="w-full py-3 px-4 rounded-xl bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white font-bold font-orbitron flex items-center justify-center gap-3 shadow-lg transition transform hover:-translate-y-0.5">
+                        <i class="fa-solid fa-robot text-lg"></i> Trening z Botem (Sztuczna Inteligencja)
+                    </button>
+
+                    <!-- Local 2 Players -->
+                    <button id="btnPlayLocal" class="w-full py-3 px-4 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-white font-bold font-orbitron flex items-center justify-center gap-3 transition transform hover:-translate-y-0.5">
+                        <i class="fa-solid fa-gamepad text-lg text-pink-400"></i> Gra Lokalna (2 Graczy - 1 Klawiatura)
+                    </button>
+
+                    <!-- Online / LAN Network -->
+                    <button id="btnPlayOnlineMenu" class="w-full py-3 px-4 rounded-xl bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 text-white font-bold font-orbitron flex items-center justify-center gap-3 shadow-lg transition transform hover:-translate-y-0.5">
+                        <i class="fa-solid fa-network-wired text-lg"></i> Gra Sieciowa (Online / LAN WebRTC)
+                    </button>
+                </div>
+
+                <div class="border-t border-slate-800 pt-3 text-left">
+                    <h3 class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 font-orbitron">Sterowanie:</h3>
+                    <div class="grid grid-cols-2 gap-2 text-xs text-slate-300">
+                        <div class="bg-slate-950 p-2 rounded border border-slate-800">
+                            <span class="text-cyan-400 font-bold block">Gracz 1 (Niebieski)</span>
+                            Poruszanie: <kbd class="px-1 bg-slate-800 rounded">WASD</kbd><br>
+                            Dash / Boost: <kbd class="px-1 bg-slate-800 rounded">SPACE</kbd>
+                        </div>
+                        <div class="bg-slate-950 p-2 rounded border border-slate-800">
+                            <span class="text-pink-400 font-bold block">Gracz 2 (Różowy)</span>
+                            Poruszanie: <kbd class="px-1 bg-slate-800 rounded">Strzałki</kbd><br>
+                            Dash / Boost: <kbd class="px-1 bg-slate-800 rounded">NUM 0</kbd> lub <kbd class="px-1 bg-slate-800 rounded">Enter</kbd>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ONLINE MULTIPLAYER SUBMENU MODAL -->
+        <div id="onlineMenu" class="hidden absolute inset-0 modal-bg flex items-center justify-center p-4 z-30">
+            <div class="max-w-md w-full bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-2xl flex flex-col gap-4 text-center">
+                <div class="flex justify-between items-center border-b border-slate-800 pb-3">
+                    <h3 class="text-xl font-bold font-orbitron text-purple-400 flex items-center gap-2">
+                        <i class="fa-solid fa-globe"></i> Multiplayer P2P
+                    </h3>
+                    <button id="btnBackToMain" class="text-slate-400 hover:text-white text-sm">
+                        <i class="fa-solid fa-xmark text-lg"></i>
+                    </button>
+                </div>
+
+                <!-- My Peer ID section -->
+                <div class="bg-slate-950 p-4 rounded-xl border border-slate-800 text-left">
+                    <label class="text-xs font-bold text-slate-400 uppercase block mb-1">Twój Kod Pokoju (Stwórz Pokój)</label>
+                    <div class="flex items-center gap-2">
+                        <input id="myPeerIdInput" type="text" readonly value="Generowanie kody..." 
+                            class="bg-slate-900 border border-slate-700 text-cyan-400 font-mono text-xs p-2 rounded-lg flex-1 outline-none select-all" />
+                        <button id="btnCopyId" class="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold rounded-lg border border-slate-700 transition flex items-center gap-1">
+                            <i class="fa-regular fa-copy"></i> Kopiuj
+                        </button>
+                    </div>
+                    <p class="text-[11px] text-slate-500 mt-1">Wyślij ten kod drugiemu graczowi w LAN lub przez Internet.</p>
+                </div>
+
+                <!-- Connect to Peer section -->
+                <div class="bg-slate-950 p-4 rounded-xl border border-slate-800 text-left">
+                    <label class="text-xs font-bold text-slate-400 uppercase block mb-1">Dołącz do Pokoju Przeciwnika</label>
+                    <div class="flex items-center gap-2">
+                        <input id="targetPeerIdInput" type="text" placeholder="Wklej Kod Pokoju przeciwnika..." 
+                            class="bg-slate-900 border border-slate-700 text-pink-400 font-mono text-xs p-2 rounded-lg flex-1 outline-none focus:border-pink-500" />
+                        <button id="btnConnectPeer" class="px-4 py-2 bg-pink-600 hover:bg-pink-500 text-white text-xs font-bold rounded-lg shadow transition">
+                            Połącz
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Network Status Indicator -->
+                <div id="netStatus" class="text-xs font-medium p-2.5 rounded-lg bg-slate-950 border border-slate-800 text-slate-400 flex items-center justify-center gap-2">
+                    <div class="w-2 h-2 rounded-full bg-amber-500 animate-pulse"></div>
+                    Inicjalizacja połączenia PeerJS...
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- FOOTER / GAME INFO -->
+    <footer class="w-full max-w-5xl text-center text-xs text-slate-500 py-1">
+        BumpArena 2D • Fizyka odbić sprężystych • Zbieraj Power-Upy: <span class="text-amber-400">Masa</span>, <span class="text-cyan-400">Dash</span>, <span class="text-purple-400">Fala (Shockwave)</span>, <span class="text-blue-400">Zamrożenie</span>
+    </footer>
+
+    <!-- GAME ENGINE LOGIC & SCRIPT -->
+    <script>
+        // --- GAME CONSTANTS & STATE ---
+        const CANVAS_WIDTH = 900;
+        const CANVAS_HEIGHT = 900;
+        
+        const GAME_MODES = {
+            MENU: 'MENU',
+            BOT: 'BOT',
+            LOCAL: 'LOCAL',
+            ONLINE_HOST: 'ONLINE_HOST',
+            ONLINE_CLIENT: 'ONLINE_CLIENT'
+        };
+
+        const POWERUP_TYPES = {
+            BOOST: { name: 'Super Dash', color: '#00f0ff', icon: '⚡' },
+            MASS: { name: 'Masa +50%', color: '#ffb703', icon: '⚓' },
+            SHOCKWAVE: { name: 'Fala Uderzeniowa', color: '#a855f7', icon: '💥' },
+            FREEZE: { name: 'Zamrożenie', color: '#3b82f6', icon: '❄️' }
+        };
+
+        let canvas, ctx;
+        let currentMode = GAME_MODES.MENU;
+        let soundEnabled = true;
+
+        // Player structure
+        class Player {
+            constructor(id, x, y, color, name) {
+                this.id = id;
+                this.x = x;
+                this.y = y;
+                this.vx = 0;
+                this.vy = 0;
+                this.radius = 28;
+                this.baseMass = 1;
+                this.mass = 1;
+                this.color = color;
+                this.name = name;
+                this.score = 0;
+                
+                // Physics setup
+                this.maxSpeed = 8.5;
+                this.accel = 0.55;
+                this.friction = 0.96;
+                
+                // Dash skill
+                this.dashCooldown = 0;
+                this.maxDashCooldown = 120; // 2 sec at 60fps
+                this.isDashing = false;
+
+                // Active effects / Powerups
+                this.frozenTimer = 0;
+                this.massTimer = 0;
+                this.hasShockwave = false;
+
+                // Animation & Visual effects
+                this.trail = [];
+                this.shockwaveVisual = 0;
+            }
+
+            reset(x, y) {
+                this.x = x;
+                this.y = y;
+                this.vx = 0;
+                this.vy = 0;
+                this.mass = this.baseMass;
+                this.frozenTimer = 0;
+                this.massTimer = 0;
+                this.dashCooldown = 0;
+                this.hasShockwave = false;
+                this.trail = [];
+            }
+
+            update(keys, isBot = false, targetPlayer = null) {
+                // Handle Effect timers
+                if (this.frozenTimer > 0) {
+                    this.frozenTimer--;
+                    this.vx *= 0.8;
+                    this.vy *= 0.8;
+                }
+                if (this.massTimer > 0) {
+                    this.massTimer--;
+                    if (this.massTimer === 0) this.mass = this.baseMass;
+                }
+                if (this.dashCooldown > 0) this.dashCooldown--;
+                if (this.shockwaveVisual > 0) this.shockwaveVisual--;
+
+                // Movement input processing
+                let ax = 0;
+                let ay = 0;
+
+                if (this.frozenTimer <= 0) {
+                    if (isBot && targetPlayer) {
+                        // AI Logic: Drive towards player or powerup, stay away from edge
+                        const distToCenter = Math.hypot(this.x - CANVAS_WIDTH / 2, this.y - CANVAS_HEIGHT / 2);
+                        const arenaRadius = 360;
+
+                        if (distToCenter > arenaRadius * 0.75) {
+                            // Steer back to center if near edge
+                            const angleToCenter = Math.atan2(CANVAS_HEIGHT / 2 - this.y, CANVAS_WIDTH / 2 - this.x);
+                            ax = Math.cos(angleToCenter);
+                            ay = Math.sin(angleToCenter);
+                        } else {
+                            // Aggressive towards enemy
+                            const angleToEnemy = Math.atan2(targetPlayer.y - this.y, targetPlayer.x - this.x);
+                            ax = Math.cos(angleToEnemy);
+                            ay = Math.sin(angleToEnemy);
+
+                            // Random Bot Dash
+                            const distToEnemy = Math.hypot(targetPlayer.x - this.x, targetPlayer.y - this.y);
+                            if (distToEnemy < 160 && this.dashCooldown === 0 && Math.random() < 0.05) {
+                                this.triggerDash(ax, ay);
+                            }
+                        }
+                    } else if (keys) {
+                        if (keys.left) ax -= 1;
+                        if (keys.right) ax += 1;
+                        if (keys.up) ay -= 1;
+                        if (keys.down) ay += 1;
+
+                        // Normalize movement vector
+                        if (ax !== 0 && ay !== 0) {
+                            ax *= 0.7071;
+                            ay *= 0.7071;
+                        }
+
+                        // Dash execution
+                        if (keys.dash && this.dashCooldown === 0) {
+                            this.triggerDash(ax, ay);
+                        }
+
+                        // Use Shockwave if collected
+                        if (keys.dash && this.hasShockwave) {
+                            this.triggerShockwave(targetPlayer);
+                        }
+                    }
+                }
+
+                // Apply Acceleration
+                this.vx += ax * this.accel;
+                this.vy += ay * this.accel;
+
+                // Friction
+                this.vx *= this.friction;
+                this.vy *= this.friction;
+
+                // Cap max speed (unless dashing)
+                const currentSpeed = Math.hypot(this.vx, this.vy);
+                if (!this.isDashing && currentSpeed > this.maxSpeed) {
+                    this.vx = (this.vx / currentSpeed) * this.maxSpeed;
+                    this.vy = (this.vy / currentSpeed) * this.maxSpeed;
+                }
+
+                // Move position
+                this.x += this.vx;
+                this.y += this.vy;
+
+                // Store trail positions
+                if (currentSpeed > 3 || this.isDashing) {
+                    this.trail.push({ x: this.x, y: this.y, alpha: 0.6, radius: this.radius * (this.massTimer > 0 ? 1.25 : 1) });
+                    if (this.trail.length > 8) this.trail.shift();
+                } else {
+                    if (this.trail.length > 0) this.trail.shift();
+                }
+
+                // Update trail opacity
+                this.trail.forEach(t => t.alpha *= 0.75);
+            }
+
+            triggerDash(dirX, dirY) {
+                let dashX = dirX;
+                let dashY = dirY;
+                
+                // If standing still, dash in current velocity direction or forward
+                if (dashX === 0 && dashY === 0) {
+                    const spd = Math.hypot(this.vx, this.vy);
+                    if (spd > 0.1) {
+                        dashX = this.vx / spd;
+                        dashY = this.vy / spd;
+                    } else {
+                        dashX = 1;
+                    }
+                }
+
+                const dashPower = 18;
+                this.vx += dashX * dashPower;
+                this.vy += dashY * dashPower;
+                this.dashCooldown = this.maxDashCooldown;
+                this.isDashing = true;
+
+                createParticles(this.x, this.y, this.color, 15);
+                playSound('dash');
+
+                setTimeout(() => { this.isDashing = false; }, 250);
+            }
+
+            triggerShockwave(enemy) {
+                if (!this.hasShockwave) return;
+                this.hasShockwave = false;
+                this.shockwaveVisual = 25;
+
+                playSound('shockwave');
+                createParticles(this.x, this.y, '#a855f7', 25);
+
+                if (enemy) {
+                    const dx = enemy.x - this.x;
+                    const dy = enemy.y - this.y;
+                    const dist = Math.hypot(dx, dy);
+                    const maxDist = 280;
+
+                    if (dist < maxDist && dist > 0) {
+                        const force = (1 - dist / maxDist) * 25;
+                        enemy.vx += (dx / dist) * force;
+                        enemy.vy += (dy / dist) * force;
+                    }
+                }
+            }
+
+            draw(ctx) {
+                // Render Motion Trail
+                this.trail.forEach(t => {
+                    ctx.save();
+                    ctx.globalAlpha = t.alpha * 0.4;
+                    ctx.beginPath();
+                    ctx.arc(t.x, t.y, t.radius, 0, Math.PI * 2);
+                    ctx.fillStyle = this.color;
+                    ctx.fill();
+                    ctx.restore();
+                });
+
+                // Shockwave visual ring
+                if (this.shockwaveVisual > 0) {
+                    const ringRadius = (25 - this.shockwaveVisual) * 12;
+                    ctx.save();
+                    ctx.beginPath();
+                    ctx.arc(this.x, this.y, ringRadius, 0, Math.PI * 2);
+                    ctx.strokeStyle = `rgba(168, 85, 247, ${this.shockwaveVisual / 25})`;
+                    ctx.lineWidth = 6;
+                    ctx.stroke();
+                    ctx.restore();
+                }
+
+                const currentRadius = this.radius * (this.massTimer > 0 ? 1.25 : 1);
+
+                ctx.save();
+                ctx.translate(this.x, this.y);
+
+                // Outer Glow & Body
+                ctx.shadowColor = this.color;
+                ctx.shadowBlur = this.isDashing ? 25 : 12;
+
+                ctx.beginPath();
+                ctx.arc(0, 0, currentRadius, 0, Math.PI * 2);
+                
+                // Gradient Fill
+                const grad = ctx.createRadialGradient(-currentRadius*0.3, -currentRadius*0.3, 2, 0, 0, currentRadius);
+                grad.addColorStop(0, '#ffffff');
+                grad.addColorStop(0.4, this.color);
+                grad.addColorStop(1, '#0f172a');
+                ctx.fillStyle = grad;
+                ctx.fill();
+
+                // Border Ring
+                ctx.strokeStyle = this.frozenTimer > 0 ? '#93c5fd' : '#ffffff';
+                ctx.lineWidth = 3;
+                ctx.stroke();
+
+                // Freeze Indicator Ring
+                if (this.frozenTimer > 0) {
+                    ctx.beginPath();
+                    ctx.arc(0, 0, currentRadius + 4, 0, Math.PI * 2);
+                    ctx.strokeStyle = 'rgba(147, 197, 253, 0.8)';
+                    ctx.lineWidth = 4;
+                    ctx.setLineDash([6, 6]);
+                    ctx.stroke();
+                }
+
+                // Direction / Impulse Marker
+                const speed = Math.hypot(this.vx, this.vy);
+                if (speed > 0.5) {
+                    const angle = Math.atan2(this.vy, this.vx);
+                    ctx.beginPath();
+                    ctx.moveTo(Math.cos(angle) * (currentRadius * 0.4), Math.sin(angle) * (currentRadius * 0.4));
+                    ctx.lineTo(Math.cos(angle) * (currentRadius * 0.9), Math.sin(angle) * (currentRadius * 0.9));
+                    ctx.strokeStyle = '#ffffff';
+                    ctx.lineWidth = 4;
+                    ctx.lineCap = 'round';
+                    ctx.stroke();
+                }
+
+                ctx.restore();
+            }
+        }
+
+        // Powerup Pickup Object
+        class PowerUp {
+            constructor(x, y, typeKey) {
+                this.x = x;
+                this.y = y;
+                this.typeKey = typeKey;
+                this.type = POWERUP_TYPES[typeKey];
+                this.radius = 18;
+                this.pulse = 0;
+            }
+
+            draw(ctx) {
+                this.pulse += 0.05;
+                const scale = 1 + Math.sin(this.pulse) * 0.1;
+
+                ctx.save();
+                ctx.translate(this.x, this.y);
+                ctx.scale(scale, scale);
+
+                // Glow
+                ctx.shadowColor = this.type.color;
+                ctx.shadowBlur = 15;
+
+                // Outer circle
+                ctx.beginPath();
+                ctx.arc(0, 0, this.radius, 0, Math.PI * 2);
+                ctx.fillStyle = '#0f172a';
+                ctx.fill();
+                ctx.strokeStyle = this.type.color;
+                ctx.lineWidth = 3;
+                ctx.stroke();
+
+                // Icon text
+                ctx.font = '14px sans-serif';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText(this.type.icon, 0, 1);
+
+                ctx.restore();
+            }
+        }
+
+        // Visual Particles
+        class Particle {
+            constructor(x, y, color) {
+                this.x = x;
+                this.y = y;
+                this.color = color;
+                const angle = Math.random() * Math.PI * 2;
+                const speed = Math.random() * 6 + 2;
+                this.vx = Math.cos(angle) * speed;
+                this.vy = Math.sin(angle) * speed;
+                this.life = 1.0;
+                this.decay = Math.random() * 0.04 + 0.02;
+                this.size = Math.random() * 5 + 2;
+            }
+
+            update() {
+                this.x += this.vx;
+                this.y += this.vy;
+                this.vx *= 0.95;
+                this.vy *= 0.95;
+                this.life -= this.decay;
+            }
+
+            draw(ctx) {
+                ctx.save();
+                ctx.globalAlpha = Math.max(0, this.life);
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+                ctx.fillStyle = this.color;
+                ctx.fill();
+                ctx.restore();
+            }
+        }
+
+        // --- GLOBAL GAME STATE VARIABLES ---
+        let player1 = new Player(1, CANVAS_WIDTH * 0.35, CANVAS_HEIGHT / 2, '#06b6d4', 'Gracz 1');
+        let player2 = new Player(2, CANVAS_WIDTH * 0.65, CANVAS_HEIGHT / 2, '#ec4899', 'Gracz 2');
+        let powerUps = [];
+        let particles = [];
+        let powerUpSpawnTimer = 0;
+
+        // Arena attributes
+        const arena = {
+            x: CANVAS_WIDTH / 2,
+            y: CANVAS_HEIGHT / 2,
+            radius: 360,
+            pulse: 0
+        };
+
+        // Keyboard State
+        const keyState = {};
+
+        // WebRTC PeerJS State
+        let peer = null;
+        let peerConn = null;
+        let isHost = false;
+
+        // Sound Effects System (Web Audio API Synthesizer)
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        function playSound(type) {
+            if (!soundEnabled) return;
+            try {
+                const osc = audioCtx.createOscillator();
+                const gain = audioCtx.createGain();
+                osc.connect(gain);
+                gain.connect(audioCtx.destination);
+
+                const now = audioCtx.currentTime;
+
+                if (type === 'hit') {
+                    osc.type = 'triangle';
+                    osc.frequency.setValueAtTime(220, now);
+                    osc.frequency.exponentialRampToValueAtTime(80, now + 0.15);
+                    gain.gain.setValueAtTime(0.4, now);
+                    gain.gain.exponentialRampToValueAtTime(0.01, now + 0.15);
+                    osc.start(now);
+                    osc.stop(now + 0.15);
+                } else if (type === 'dash') {
+                    osc.type = 'sine';
+                    osc.frequency.setValueAtTime(400, now);
+                    osc.frequency.exponentialRampToValueAtTime(800, now + 0.12);
+                    gain.gain.setValueAtTime(0.3, now);
+                    gain.gain.exponentialRampToValueAtTime(0.01, now + 0.12);
+                    osc.start(now);
+                    osc.stop(now + 0.12);
+                } else if (type === 'powerup') {
+                    osc.type = 'sine';
+                    osc.frequency.setValueAtTime(523.25, now);
+                    osc.frequency.setValueAtTime(659.25, now + 0.08);
+                    osc.frequency.setValueAtTime(783.99, now + 0.16);
+                    gain.gain.setValueAtTime(0.25, now);
+                    gain.gain.exponentialRampToValueAtTime(0.01, now + 0.25);
+                    osc.start(now);
+                    osc.stop(now + 0.25);
+                } else if (type === 'fall') {
+                    osc.type = 'sawtooth';
+                    osc.frequency.setValueAtTime(300, now);
+                    osc.frequency.linearRampToValueAtTime(40, now + 0.4);
+                    gain.gain.setValueAtTime(0.4, now);
+                    gain.gain.exponentialRampToValueAtTime(0.01, now + 0.4);
+                    osc.start(now);
+                    osc.stop(now + 0.4);
+                } else if (type === 'shockwave') {
+                    osc.type = 'square';
+                    osc.frequency.setValueAtTime(150, now);
+                    osc.frequency.exponentialRampToValueAtTime(40, now + 0.25);
+                    gain.gain.setValueAtTime(0.3, now);
+                    gain.gain.exponentialRampToValueAtTime(0.01, now + 0.25);
+                    osc.start(now);
+                    osc.stop(now + 0.25);
+                }
+            } catch (e) {
+                // Audio Context fallback handling
+            }
+        }
+
+        // --- INITIALIZATION ---
+        window.onload = () => {
+            canvas = document.getElementById('gameCanvas');
+            ctx = canvas.getContext('2d');
+
+            canvas.width = CANVAS_WIDTH;
+            canvas.height = CANVAS_HEIGHT;
+
+            // Keyboard Listeners
+            window.addEventListener('keydown', e => { keyState[e.code] = true; });
+            window.addEventListener('keyup', e => { keyState[e.code] = false; });
+
+            // UI Button Bindings
+            document.getElementById('btnPlayBot').onclick = () => startGame(GAME_MODES.BOT);
+            document.getElementById('btnPlayLocal').onclick = () => startGame(GAME_MODES.LOCAL);
+            document.getElementById('btnPlayOnlineMenu').onclick = openOnlineMenu;
+            document.getElementById('btnBackToMain').onclick = closeOnlineMenu;
+            document.getElementById('btnMenu').onclick = returnToMenu;
+            document.getElementById('btnCopyId').onclick = copyPeerId;
+            document.getElementById('btnConnectPeer').onclick = connectToPeer;
+
+            document.getElementById('btnSound').onclick = () => {
+                soundEnabled = !soundEnabled;
+                document.getElementById('btnSound').innerHTML = soundEnabled ? 
+                    '<i class="fa-solid fa-volume-high"></i>' : '<i class="fa-solid fa-volume-xmark text-red-400"></i>';
+            };
+
+            // Start Main Game Loop
+            requestAnimationFrame(gameLoop);
+        };
+
+        // --- GAME LOGIC LOOPS & UPDATES ---
+
+        function startGame(mode) {
+            currentMode = mode;
+            player1.score = 0;
+            player2.score = 0;
+            resetRound();
+
+            // UI Updates
+            document.getElementById('mainMenu').classList.add('hidden');
+            document.getElementById('onlineMenu').classList.add('hidden');
+            document.getElementById('scoreboard').classList.remove('hidden');
+            document.getElementById('btnMenu').classList.remove('hidden');
+            document.getElementById('hudSkills').classList.remove('hidden');
+
+            const badge = document.getElementById('gameModeBadge');
+            if (mode === GAME_MODES.BOT) {
+                badge.textContent = 'Trening vs BOT';
+                player2.name = 'BOT (AI)';
+            } else if (mode === GAME_MODES.LOCAL) {
+                badge.textContent = 'Lokalny 1v1';
+                player2.name = 'Gracz 2';
+            } else if (mode === GAME_MODES.ONLINE_HOST) {
+                badge.textContent = 'Online (HOST)';
+                player2.name = 'Przeciwnik WebRTC';
+            } else if (mode === GAME_MODES.ONLINE_CLIENT) {
+                badge.textContent = 'Online (KLIENT)';
+                player2.name = 'Host WebRTC';
+            }
+
+            document.getElementById('p1Name').textContent = player1.name;
+            document.getElementById('p2Name').textContent = player2.name;
+        }
+
+        function resetRound() {
+            player1.reset(CANVAS_WIDTH * 0.35, CANVAS_HEIGHT / 2);
+            player2.reset(CANVAS_WIDTH * 0.65, CANVAS_HEIGHT / 2);
+            powerUps = [];
+            particles = [];
+            powerUpSpawnTimer = 0;
+            updateScoreboard();
+        }
+
+        function updateScoreboard() {
+            document.getElementById('p1Score').textContent = player1.score;
+            document.getElementById('p2Score').textContent = player2.score;
+        }
+
+        function returnToMenu() {
+            currentMode = GAME_MODES.MENU;
+            document.getElementById('mainMenu').classList.remove('hidden');
+            document.getElementById('scoreboard').classList.add('hidden');
+            document.getElementById('btnMenu').classList.add('hidden');
+            document.getElementById('hudSkills').classList.add('hidden');
+            
+            if (peerConn) {
+                peerConn.close();
+                peerConn = null;
+            }
+        }
+
+        function createParticles(x, y, color, count = 10) {
+            for (let i = 0; i < count; i++) {
+                particles.push(new Particle(x, y, color));
+            }
+        }
+
+        function spawnPowerUp() {
+            const types = Object.keys(POWERUP_TYPES);
+            const randomType = types[Math.floor(Math.random() * types.length)];
+            
+            // Random position inside arena
+            const angle = Math.random() * Math.PI * 2;
+            const dist = Math.random() * (arena.radius * 0.65);
+            const x = arena.x + Math.cos(angle) * dist;
+            const y = arena.y + Math.sin(angle) * dist;
+
+            powerUps.push(new PowerUp(x, y, randomType));
+        }
+
+        // Elastic Collision Resolution between 2 Players
+        function handlePlayerCollisions(p1, p2) {
+            const dx = p2.x - p1.x;
+            const dy = p2.y - p1.y;
+            const distance = Math.hypot(dx, dy);
+            const minRadius = (p1.massTimer > 0 ? p1.radius * 1.25 : p1.radius) + 
+                             (p2.massTimer > 0 ? p2.radius * 1.25 : p2.radius);
+
+            if (distance < minRadius) {
+                playSound('hit');
+
+                // Normal vector
+                const nx = dx / (distance || 1);
+                const ny = dy / (distance || 1);
+
+                // Separate players to avoid overlap
+                const overlap = minRadius - distance;
+                p1.x -= nx * overlap * 0.5;
+                p1.y -= ny * overlap * 0.5;
+                p2.x += nx * overlap * 0.5;
+                p2.y += ny * overlap * 0.5;
+
+                // Relative velocity
+                const kx = p1.vx - p2.vx;
+                const ky = p1.vy - p2.vy;
+                const p = 2 * (nx * kx + ny * ky) / (p1.mass + p2.mass);
+
+                // Elastic rebound impulse
+                const bouncePower = 1.35; // Slight impulse boost for dynamic knockbacks
+                p1.vx -= p * p2.mass * nx * bouncePower;
+                p1.vy -= p * p2.mass * ny * bouncePower;
+                p2.vx += p * p1.mass * nx * bouncePower;
+                p2.vy += p * p1.mass * ny * bouncePower;
+
+                // Particle explosion at point of impact
+                const midX = (p1.x + p2.x) / 2;
+                const midY = (p1.y + p2.y) / 2;
+                createParticles(midX, midY, '#ffffff', 12);
+            }
+        }
+
+        // Check fall off arena ring
+        function checkRingOut(player, opponent) {
+            const distFromCenter = Math.hypot(player.x - arena.x, player.y - arena.y);
+            
+            // Out of bounds detection
+            if (distFromCenter > arena.radius + player.radius) {
+                playSound('fall');
+                createParticles(player.x, player.y, player.color, 30);
+                opponent.score++;
+                updateScoreboard();
+                resetRound();
+            }
+        }
+
+        // --- MAIN ENGINE LOOP ---
+        function gameLoop() {
+            // Clear background
+            ctx.fillStyle = '#060913';
+            ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+
+            // Render Dynamic Neon Arena Ring
+            arena.pulse += 0.02;
+            ctx.save();
+            ctx.beginPath();
+            ctx.arc(arena.x, arena.y, arena.radius, 0, Math.PI * 2);
+            ctx.fillStyle = '#0f172a';
+            ctx.fill();
+            ctx.shadowColor = '#00f0ff';
+            ctx.shadowBlur = 20 + Math.sin(arena.pulse) * 5;
+            ctx.strokeStyle = '#38bdf8';
+            ctx.lineWidth = 6;
+            ctx.stroke();
+
+            // Inner decorative ring grid lines
+            ctx.beginPath();
+            ctx.arc(arena.x, arena.y, arena.radius * 0.5, 0, Math.PI * 2);
+            ctx.strokeStyle = 'rgba(56, 189, 248, 0.15)';
+            ctx.lineWidth = 2;
+            ctx.stroke();
+            ctx.restore();
+
+            if (currentMode !== GAME_MODES.MENU) {
+                // Spawn Power-Ups periodically
+                powerUpSpawnTimer++;
+                if (powerUpSpawnTimer > 360 && powerUps.length < 2) { // Every ~6 sec
+                    spawnPowerUp();
+                    powerUpSpawnTimer = 0;
+                }
+
+                // Inputs for Player 1 (WASD + Space)
+                const p1Inputs = {
+                    left: keyState['KeyA'] || keyState['ArrowLeft'] && currentMode === GAME_MODES.ONLINE_CLIENT,
+                    right: keyState['KeyD'] || keyState['ArrowRight'] && currentMode === GAME_MODES.ONLINE_CLIENT,
+                    up: keyState['KeyW'] || keyState['ArrowUp'] && currentMode === GAME_MODES.ONLINE_CLIENT,
+                    down: keyState['KeyS'] || keyState['ArrowDown'] && currentMode === GAME_MODES.ONLINE_CLIENT,
+                    dash: keyState['Space'] || keyState['KeyW'] && keyState['ShiftLeft']
+                };
+
+                // Inputs for Player 2 (Local Arrows + Numpad0 or Bot or Network)
+                let p2Inputs = null;
+                if (currentMode === GAME_MODES.LOCAL) {
+                    p2Inputs = {
+                        left: keyState['ArrowLeft'],
+                        right: keyState['ArrowRight'],
+                        up: keyState['ArrowUp'],
+                        down: keyState['ArrowDown'],
+                        dash: keyState['Numpad0'] || keyState['Enter']
+                    };
+                }
+
+                // ONLINE MULTIPLAYER SYNC
+                if (currentMode === GAME_MODES.ONLINE_HOST) {
+                    player1.update(p1Inputs, false, player2);
+                    // player2 inputs received over WebRTC network
+                    player2.update(keyState.remoteP2Inputs, false, player1);
+
+                    // Send Host state to Client
+                    sendNetworkState();
+                } else if (currentMode === GAME_MODES.ONLINE_CLIENT) {
+                    // Client sends key state to host
+                    sendInputState(p1Inputs);
+                    // Client position rendering is synced via host updates in receiveNetworkState()
+                } else {
+                    // LOCAL / BOT MODES
+                    player1.update(p1Inputs, false, player2);
+                    player2.update(p2Inputs, currentMode === GAME_MODES.BOT, player1);
+                }
+
+                // Collision Physics & Ring Out (Host / Local controls engine truth)
+                if (currentMode !== GAME_MODES.ONLINE_CLIENT) {
+                    handlePlayerCollisions(player1, player2);
+                    checkRingOut(player1, player2);
+                    checkRingOut(player2, player1);
+
+                    // PowerUp collisions
+                    powerUps.forEach((pu, idx) => {
+                        [player1, player2].forEach(p => {
+                            const d = Math.hypot(p.x - pu.x, p.y - pu.y);
+                            if (d < p.radius + pu.radius) {
+                                playSound('powerup');
+                                createParticles(pu.x, pu.y, pu.type.color, 15);
+
+                                // Apply PowerUp effect
+                                if (pu.typeKey === 'BOOST') {
+                                    p.dashCooldown = 0;
+                                } else if (pu.typeKey === 'MASS') {
+                                    p.mass = 2.2;
+                                    p.massTimer = 300; // 5 seconds
+                                } else if (pu.typeKey === 'SHOCKWAVE') {
+                                    p.hasShockwave = true;
+                                } else if (pu.typeKey === 'FREEZE') {
+                                    const other = (p === player1) ? player2 : player1;
+                                    other.frozenTimer = 120; // 2 seconds
+                                }
+
+                                powerUps.splice(idx, 1);
+                            }
+                        });
+                    });
+                }
+
+                // Render Power-Ups
+                powerUps.forEach(pu => pu.draw(ctx));
+
+                // Update & Render Particles
+                for (let i = particles.length - 1; i >= 0; i--) {
+                    particles[i].update();
+                    particles[i].draw(ctx);
+                    if (particles[i].life <= 0) particles.splice(i, 1);
+                }
+
+                // Render Players
+                player1.draw(ctx);
+                player2.draw(ctx);
+
+                // Update HUD Skill Bar DOM Elements
+                document.getElementById('p1DashBar').style.width = `${100 - (player1.dashCooldown / player1.maxDashCooldown) * 100}%`;
+                document.getElementById('p2DashBar').style.width = `${100 - (player2.dashCooldown / player2.maxDashCooldown) * 100}%`;
+            }
+
+            requestAnimationFrame(gameLoop);
+        }
+
+        // --- WEBRTC PEERJS MULTIPLAYER LOGIC ---
+
+        function openOnlineMenu() {
+            document.getElementById('onlineMenu').classList.remove('hidden');
+            if (!peer) {
+                initPeer();
+            }
+        }
+
+        function closeOnlineMenu() {
+            document.getElementById('onlineMenu').classList.add('hidden');
+        }
+
+        function initPeer() {
+            const statusEl = document.getElementById('netStatus');
+            statusEl.innerHTML = `<div class="w-2 h-2 rounded-full bg-amber-500 animate-pulse"></div> Łączenie z serwerem PeerJS...`;
+
+            // Initialize PeerJS
+            peer = new Peer();
+
+            peer.on('open', (id) => {
+                document.getElementById('myPeerIdInput').value = id;
+                statusEl.className = "text-xs font-medium p-2.5 rounded-lg bg-emerald-950/80 border border-emerald-700/50 text-emerald-300 flex items-center justify-center gap-2";
+                statusEl.innerHTML = `<i class="fa-solid fa-circle-check"></i> Gotowy! Wygenerowano twój unikalny kod pokoju.`;
+            });
+
+            peer.on('connection', (conn) => {
+                peerConn = conn;
+                setupConnectionListeners();
+                startGame(GAME_MODES.ONLINE_HOST);
+            });
+
+            peer.on('error', (err) => {
+                console.error("PeerJS Error:", err);
+                statusEl.className = "text-xs font-medium p-2.5 rounded-lg bg-red-950/80 border border-red-700/50 text-red-300 flex items-center justify-center gap-2";
+                statusEl.innerHTML = `<i class="fa-solid fa-triangle-exclamation"></i> Błąd sieci: ${err.type}`;
+            });
+        }
+
+        function copyPeerId() {
+            const input = document.getElementById('myPeerIdInput');
+            input.select();
+            document.execCommand('copy');
+            
+            const btn = document.getElementById('btnCopyId');
+            btn.innerHTML = `<i class="fa-solid fa-check"></i> Skopiowano!`;
+            setTimeout(() => {
+                btn.innerHTML = `<i class="fa-regular fa-copy"></i> Kopiuj`;
+            }, 2000);
+        }
+
+        function connectToPeer() {
+            const targetId = document.getElementById('targetPeerIdInput').value.trim();
+            if (!targetId || !peer) return;
+
+            const statusEl = document.getElementById('netStatus');
+            statusEl.innerHTML = `<div class="w-2 h-2 rounded-full bg-blue-500 animate-pulse"></div> Łączenie z pokojem gracza...`;
+
+            peerConn = peer.connect(targetId);
+            setupConnectionListeners();
+        }
+
+        function setupConnectionListeners() {
+            peerConn.on('open', () => {
+                const statusEl = document.getElementById('netStatus');
+                statusEl.className = "text-xs font-medium p-2.5 rounded-lg bg-emerald-950/80 border border-emerald-700/50 text-emerald-300 flex items-center justify-center gap-2";
+                statusEl.innerHTML = `<i class="fa-solid fa-link"></i> Połączono pomyślnie z drugim graczem!`;
+
+                if (!isHost) {
+                    startGame(GAME_MODES.ONLINE_CLIENT);
+                }
+            });
+
+            peerConn.on('data', (data) => {
+                if (data.type === 'INPUTS' && currentMode === GAME_MODES.ONLINE_HOST) {
+                    keyState.remoteP2Inputs = data.inputs;
+                } else if (data.type === 'STATE' && currentMode === GAME_MODES.ONLINE_CLIENT) {
+                    // Sync state from Host
+                    player1.x = data.p1.x;
+                    player1.y = data.p1.y;
+                    player1.vx = data.p1.vx;
+                    player1.vy = data.p1.vy;
+                    player1.score = data.p1.score;
+
+                    player2.x = data.p2.x;
+                    player2.y = data.p2.y;
+                    player2.vx = data.p2.vx;
+                    player2.vy = data.p2.vy;
+                    player2.score = data.p2.score;
+
+                    powerUps = data.powerUps.map(pu => new PowerUp(pu.x, pu.y, pu.typeKey));
+                    updateScoreboard();
+                }
+            });
+
+            peerConn.on('close', () => {
+                alert('Połączenie sieciowe zostało zakończone.');
+                returnToMenu();
+            });
+        }
+
+        function sendNetworkState() {
+            if (peerConn && peerConn.open) {
+                peerConn.send({
+                    type: 'STATE',
+                    p1: { x: player1.x, y: player1.y, vx: player1.vx, vy: player1.vy, score: player1.score },
+                    p2: { x: player2.x, y: player2.y, vx: player2.vx, vy: player2.vy, score: player2.score },
+                    powerUps: powerUps.map(pu => ({ x: pu.x, y: pu.y, typeKey: pu.typeKey }))
+                });
+            }
+        }
+
+        function sendInputState(inputs) {
+            if (peerConn && peerConn.open) {
+                peerConn.send({
+                    type: 'INPUTS',
+                    inputs: inputs
+                });
+            }
+        }
+    </script>
+</body>
+</html>
